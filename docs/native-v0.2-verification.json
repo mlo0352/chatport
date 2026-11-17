@@ -1,0 +1,8 @@
+{
+  "binary": "chatport.exe",
+  "nativeUI": true,
+  "serviceCrashRecovered": true,
+  "folderOverrideSurvived": true,
+  "exportCompleted": true,
+  "serviceSurvivedWindowClose": true
+}

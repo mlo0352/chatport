@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "chats": 159,
+  "sources": [
+    {
+      "name": "Codex",
+      "count": 156
+    },
+    {
+      "name": "Claude Code",
+      "count": 0
+    },
+    {
+      "name": "OpenCode",
+      "count": 1
+    },
+    {
+      "name": "T3 Code",
+      "count": 0
+    },
+    {
+      "name": "Freebuff",
+      "count": 2
+    }
+  ],
+  "preferences": {
+    "theme": "system",
+    "liveUpdates": true,
+    "includeImages": true
+  },
+  "active": 2
+}

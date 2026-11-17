@@ -1,0 +1,45 @@
+{
+  "name": "chatport",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:ui": "vite --host 127.0.0.1",
+    "check": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build && node scripts/build-service.mjs",
+    "icons": "tauri icon app-icon.svg",
+    "dist": "node scripts/desktop-build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:ui": "playwright test",
+    "test:native":"node tests/native-smoke.mjs",
+    "test:focus":"node tests/native-focus.mjs",
+    "format": "prettier --write src service scripts tests *.json *.ts"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "bonjour-service": "^1.4.4",
+    "lucide-react": "^0.577.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "selfsigned": "^5.5.0",
+    "yauzl": "^3.2.0",
+    "yazl": "^3.3.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@tauri-apps/cli": "^2.12.4",
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^2.4.5",
+    "@vitejs/plugin-react": "^4.7.0",
+    "esbuild": "^0.25.12",
+    "prettier": "^3.10.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.1"
+  }
+}

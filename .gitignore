@@ -1,0 +1,7 @@
+node_modules/
+dist/
+chatport-runtime/
+.test-data/
+test-results/
+src-tauri/target/
+ChatPort-Setup.exe

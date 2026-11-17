@@ -1,0 +1,1 @@
+{"chatport-main":{"identifier":"chatport-main","description":"ChatPort desktop window and native folder pickers","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-minimize","core:window:allow-toggle-maximize","core:window:allow-close","core:window:allow-start-dragging","dialog:allow-open","dialog:allow-save"]}}

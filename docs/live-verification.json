@@ -1,0 +1,33 @@
+{
+  "conversations": 156,
+  "sources": [
+    {
+      "provider": "codex",
+      "count": 156,
+      "available": true
+    },
+    {
+      "provider": "claude",
+      "count": 0,
+      "available": false
+    },
+    {
+      "provider": "opencode",
+      "count": 0,
+      "available": true
+    },
+    {
+      "provider": "t3",
+      "count": 0,
+      "available": false
+    }
+  ],
+  "scanMs": 185,
+  "libraryP95Ms": 9,
+  "exportMs": 120766,
+  "archiveBytes": 1619742643,
+  "archiveSHA256": "c4655f6ce062585ddc1f100739a328ee9bf40fce517af5703c725844a6369764",
+  "nativeResumeSameId": true,
+  "nativeResumeFolderVerified": true,
+  "importCount": 156
+}
