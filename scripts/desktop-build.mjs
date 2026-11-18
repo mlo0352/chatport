@@ -1,13 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, copyFileSync, readFileSync } from "node:fs";
-import { resolve, join } from "node:path";
-const target = resolve(
-  process.platform === "win32" && existsSync("../termsanity/src-tauri/target")
-    ? "../termsanity/src-tauri/target"
-    : "src-tauri/target",
-);
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+const target = resolve("src-tauri/target");
 const run = (args) => {
-  const r = spawnSync(process.execPath, args, {
+  const result = spawnSync(process.execPath, args, {
     stdio: "inherit",
     windowsHide: true,
     env: {
@@ -16,23 +14,20 @@ const run = (args) => {
       CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS || "2",
     },
   });
-  if (r.status !== 0) process.exit(r.status || 1);
+  if (result.status !== 0) process.exit(result.status || 1);
 };
-run([
-  "node_modules/@tauri-apps/cli/tauri.js",
-  "build",
-  ...(process.platform === "linux"
-    ? ["--config", "src-tauri/tauri.linux.conf.json"]
-    : []),
-]);
-if (process.platform !== "win32") {
-  console.log("Packages: " + join(target, "release/bundle"));
-  process.exit(0);
+
+run(["node_modules/@tauri-apps/cli/tauri.js", "build", "--no-bundle"]);
+
+const ext = process.platform === "win32" ? ".exe" : "";
+const binary = join(target, `release/chatport${ext}`);
+const output = `ChatPort${ext}`;
+if (!existsSync(binary)) {
+  console.error(`Build succeeded but ${binary} was not produced.`);
+  process.exit(1);
 }
-const version = JSON.parse(readFileSync("package.json", "utf8")).version;
-const installer = join(
-  target,
-  `release/bundle/nsis/ChatPort_${version}_${process.arch === "arm64" ? "arm64" : "x64"}-setup.exe`,
-);
-copyFileSync(installer, "ChatPort-Setup.exe");
-console.log("Installer: " + resolve("ChatPort-Setup.exe"));
+copyFileSync(binary, output);
+const hash = createHash("sha256").update(readFileSync(output)).digest("hex");
+writeFileSync(`${output}.sha256`, `${hash}  ${output}\n`);
+console.log(`Portable build: ${resolve(output)}`);
+console.log(`SHA-256: ${hash}`);

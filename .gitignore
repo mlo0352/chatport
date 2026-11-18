@@ -5,3 +5,5 @@ chatport-runtime/
 test-results/
 src-tauri/target/
 ChatPort-Setup.exe
+ChatPort.exe
+ChatPort.exe.sha256

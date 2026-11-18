@@ -4,7 +4,7 @@ A standalone desktop conversation library. Browse local coding-agent chats, choo
 
 ## Launch
 
-Run **Launch ChatPort.cmd** or **ChatPort-Setup.exe** in this folder. The installer includes its runtime; Node and Rust are not needed on the destination computer. The installed application is `%LOCALAPPDATA%\ChatPort\chatport.exe`.
+Download the latest portable **ChatPort.exe** from [Releases](https://github.com/mlo0352/chatport/releases/latest) and run it. There is no installer. The executable contains its Node runtime; Node and Rust are not needed. Windows 10/11 with WebView2 is required. ChatPort stores its data in `%LOCALAPPDATA%\ChatPort`.
 
 Use **Sources & integrations** to add a custom provider profile. The default scan checks Codex, Claude Code, OpenCode, and T3 Code stores in the current Windows account, plus configured provider homes. It does not search every file on every drive or read other Windows accounts. ChatGPT cloud history needs a user-provided ChatGPT JSON or ZIP data export.
 
@@ -45,7 +45,7 @@ For an active Codex chat, **Focus open chat** locates a host window when the des
 
 1. Click **Export all**, or check specific conversations and click **Export N**.
 2. Choose a USB drive, mapped drive, or UNC folder such as `\\server\share\Chats`. The job continues while you browse, and also if you close the UI while the computer stays running.
-3. On the destination computer, install ChatPort and click **Import**. Pick the `.chatport.zip` file. Each listed file is checked against its SHA-256 hash before the archive enters the library.
+3. On the destination computer, run ChatPort and click **Import**. Pick the `.chatport.zip` file. Each listed file is checked against its SHA-256 hash before the archive enters the library.
 4. To continue imported Codex sessions, click **Restore profile**, choose an empty folder, then set a resume folder and click **Resume in terminal**. The restored folder becomes `CODEX_HOME`. Sign in to Codex on the destination machine if needed.
 
 Restoration preserves native conversation IDs. It refuses to replace an existing conversation profile. Existing `auth.json` and `config.toml` can remain in an otherwise empty destination; those files are never replaced. There is no merge into a populated provider database in this version. Imported Claude, OpenCode, T3, and ChatGPT conversations can be browsed and re-exported; native installation into those providers is not automated.
@@ -63,7 +63,7 @@ npm install
 npm run dev       # local development UI, port 1435
 npm test          # native store/transfer/ZIP tests
 npm run test:ui   # browser interaction tests
-npm run dist      # Windows executable and NSIS installer; requires Rust + WebView2 tools
+npm run dist      # portable Windows executable; requires Rust + WebView2 tools
 ```
 
 `node tests/live-machine.mjs` is an opt-in live-data verification: it creates local test copies of the discovered chats, exports/imports them, restores an isolated Codex profile, and probes resume with a different folder. It sends no model turn. Large history stores need temporary disk space. `tests/native-smoke.mjs` tests the packaged Windows UI with synthetic provider data.

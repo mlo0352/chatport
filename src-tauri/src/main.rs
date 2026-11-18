@@ -10,7 +10,8 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tauri::Manager;
+#[cfg(not(debug_assertions))]
+static RUNTIME_ZIP: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/runtime.zip"));
 static STARTUP: Mutex<()> = Mutex::new(());
 fn data_dir() -> PathBuf {
     std::env::var_os("CHATPORT_DATA")
@@ -32,24 +33,54 @@ fn data_dir() -> PathBuf {
             }
         })
 }
-fn runtime(app: &tauri::AppHandle) -> PathBuf {
-    let path = if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("chatport-runtime")
-    } else {
-        app.path().resource_dir().unwrap().join("chatport-runtime")
-    };
-    #[cfg(windows)]
-    if let Some(v) = path.to_str() {
-        if let Some(unc) = v.strip_prefix(r"\\?\UNC\") {
-            return PathBuf::from(format!(r"\\{}", unc));
-        }
-        return PathBuf::from(v.strip_prefix(r"\\?\").unwrap_or(v));
+#[cfg(debug_assertions)]
+fn runtime(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("chatport-runtime"))
+}
+
+#[cfg(not(debug_assertions))]
+fn runtime(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = data_dir().join("runtime");
+    let target = base.join(env!("CHATPORT_RUNTIME_ID"));
+    if target.join(".ready").is_file() {
+        return Ok(target);
     }
-    #[allow(unreachable_code)]
-    path
+    fs::create_dir_all(&base)
+        .map_err(|e| format!("Could not prepare ChatPort's runtime folder: {e}"))?;
+    let temp = base.join(format!(
+        ".{}-{}",
+        env!("CHATPORT_RUNTIME_ID"),
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&temp);
+    fs::create_dir_all(&temp)
+        .map_err(|e| format!("Could not create ChatPort's runtime folder: {e}"))?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(RUNTIME_ZIP))
+        .map_err(|e| format!("Could not read the embedded ChatPort runtime: {e}"))?;
+    archive
+        .extract(&temp)
+        .map_err(|e| format!("Could not unpack ChatPort's runtime: {e}"))?;
+    fs::write(temp.join(".ready"), b"ok")
+        .map_err(|e| format!("Could not finish ChatPort's runtime: {e}"))?;
+    if target.exists() {
+        if target.join(".ready").is_file() {
+            let _ = fs::remove_dir_all(&temp);
+            return Ok(target);
+        }
+        fs::remove_dir_all(&target)
+            .map_err(|e| format!("Could not replace ChatPort's runtime: {e}"))?;
+    }
+    match fs::rename(&temp, &target) {
+        Ok(()) => Ok(target),
+        Err(_) if target.join(".ready").is_file() => {
+            let _ = fs::remove_dir_all(&temp);
+            Ok(target)
+        }
+        Err(error) => Err(format!("Could not activate ChatPort's runtime: {error}")),
+    }
 }
 fn request(v: &serde_json::Value, body: Option<&str>) -> Result<String, String> {
     let port = v["port"]
@@ -95,7 +126,7 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
  let dir=data_dir();fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
  let read=||fs::read_to_string(dir.join("service.json")).ok().and_then(|s|serde_json::from_str::<serde_json::Value>(&s).ok());
  if let Some(v)=read(){if healthy(&v){if v["version"].as_str()==Some(env!("CARGO_PKG_VERSION")){return Ok(v);}return Err("Another ChatPort service version is running. Finish transfers and restart ChatPort.".into());}}
- let root=runtime(&app);let log=fs::OpenOptions::new().create(true).append(true).open(dir.join("service.log")).map_err(|e|e.to_string())?;
+ let root=runtime(&app)?;let log=fs::OpenOptions::new().create(true).append(true).open(dir.join("service.log")).map_err(|e|e.to_string())?;
  let mut cmd=Command::new(root.join(if cfg!(windows){"node.exe"}else{"node"}));cmd.arg(root.join("service.cjs")).arg("--data").arg(&dir).current_dir(&dir).stdin(Stdio::null()).stdout(log.try_clone().map_err(|e|e.to_string())?).stderr(log);
  #[cfg(windows)] cmd.creation_flags(0x08000000|0x00000200|0x00000008);
  cmd.spawn().map_err(|e|format!("Could not start ChatPort: {e}"))?;
@@ -175,7 +206,9 @@ fn focus_window(handle: u64, pid: u32) -> Result<(), String> {
             .output()
             .map_err(|_| "Install xdotool to activate an X11 window on Linux".to_string())?;
         if !output.status.success() {
-            return Err("The Linux desktop did not allow this window to come to the foreground".into());
+            return Err(
+                "The Linux desktop did not allow this window to come to the foreground".into(),
+            );
         }
         return Ok(());
     }

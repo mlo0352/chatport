@@ -2,13 +2,7 @@ import { build } from "esbuild";
 import { mkdir, copyFile, chmod } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-const probeTarget =
-  process.env.CARGO_TARGET_DIR ||
-  resolve(
-    process.platform === "win32"
-      ? "../termsanity/src-tauri/target"
-      : "src-tauri/target",
-  );
+const probeTarget = process.env.CARGO_TARGET_DIR || resolve("src-tauri/target");
 const probeBuild = spawnSync(
   "cargo",
   [

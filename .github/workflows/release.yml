@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Verify tag matches version
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $version"
+            exit 1
+          fi
+
+      - run: npm run check
+
+      - run: npm run dist
+
+      - name: Prepare release asset
+        shell: bash
+        run: |
+          test -f ChatPort.exe
+          sha256sum ChatPort.exe > ChatPort.exe.sha256
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" ChatPort.exe ChatPort.exe.sha256 --clobber
+          else
+            gh release create "$tag" ChatPort.exe ChatPort.exe.sha256 \
+              --title "ChatPort ${tag#v}" \
+              --notes "Portable Windows build. Download ChatPort.exe and run it. No installer or separate Node runtime is required. Requires Windows 10/11 with Microsoft Edge WebView2."
+          fi
