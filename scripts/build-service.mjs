@@ -18,6 +18,7 @@ const probeBuild = spawnSync(
       ...process.env,
       CARGO_TARGET_DIR: probeTarget,
       CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS || "2",
+      CHATPORT_SKIP_RUNTIME_EMBED: "1",
     },
     windowsHide: true,
     stdio: "inherit",

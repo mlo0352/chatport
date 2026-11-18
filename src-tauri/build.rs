@@ -21,6 +21,12 @@ fn collect_files(current: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()
 
 fn main() {
     tauri_build::build();
+    println!("cargo:rerun-if-env-changed=CHATPORT_SKIP_RUNTIME_EMBED");
+
+    // The activity probe is built before the runtime folder is populated.
+    if env::var_os("CHATPORT_SKIP_RUNTIME_EMBED").is_some() {
+        return;
+    }
 
     // Debug builds run from the checked-out runtime folder. Release builds embed it.
     if env::var("PROFILE").as_deref() != Ok("release") {
