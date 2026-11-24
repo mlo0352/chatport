@@ -5,7 +5,7 @@ use std::{
     fs,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Mutex,
     time::Duration,
@@ -119,18 +119,70 @@ fn healthy(v: &serde_json::Value) -> bool {
         .map(|r| r.contains("200 OK") && r.contains("\"ok\":true"))
         .unwrap_or(false)
 }
+fn read_service(dir: &Path) -> Option<serde_json::Value> {
+    fs::read_to_string(dir.join("service.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
+fn service_error(response: &str) -> String {
+    response
+        .split_once("\r\n\r\n")
+        .and_then(|(_, body)| serde_json::from_str::<serde_json::Value>(body).ok())
+        .and_then(|v| v["error"].as_str().map(str::to_string))
+        .unwrap_or_else(|| "The previous ChatPort service did not stop".into())
+}
+fn forget_service(dir: &Path, expected: &serde_json::Value) {
+    if let Some(current) = read_service(dir) {
+        if current["pid"] == expected["pid"] && current["token"] == expected["token"] {
+            let _ = fs::remove_file(dir.join("service.json"));
+        }
+    }
+}
+fn stop_service(dir: &Path, v: &serde_json::Value) -> Result<(), String> {
+    if !healthy(v) {
+        forget_service(dir, v);
+        return Ok(());
+    }
+    if let Ok(response) = request(v, Some(r#"{"method":"shutdown","params":{}}"#)) {
+        if !response.contains("200 OK") {
+            return Err(service_error(&response));
+        }
+    }
+    for _ in 0..50 {
+        if !healthy(v) {
+            forget_service(dir, v);
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err("The previous ChatPort service did not stop".into())
+}
+fn stop_current_service() {
+    let dir = data_dir();
+    if let Some(v) = read_service(&dir) {
+        let _ = stop_service(&dir, &v);
+    }
+}
 #[tauri::command]
 async fn bootstrap(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move||{
  let _guard=STARTUP.lock().map_err(|e|e.to_string())?;
  let dir=data_dir();fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
- let read=||fs::read_to_string(dir.join("service.json")).ok().and_then(|s|serde_json::from_str::<serde_json::Value>(&s).ok());
- if let Some(v)=read(){if healthy(&v){if v["version"].as_str()==Some(env!("CARGO_PKG_VERSION")){return Ok(v);}return Err("Another ChatPort service version is running. Finish transfers and restart ChatPort.".into());}}
+ if let Some(v)=read_service(&dir){
+  if healthy(&v){
+   if v["version"].as_str()==Some(env!("CARGO_PKG_VERSION")){return Ok(v);}
+   stop_service(&dir,&v).map_err(|e|{
+    let old=v["version"].as_str().unwrap_or("older");
+    let pid=v["pid"].as_u64().unwrap_or(0);
+    format!("ChatPort {old} is still running in the background (process {pid}). {e}")
+   })?;
+  }else{forget_service(&dir,&v);}
+ }
  let root=runtime(&app)?;let log=fs::OpenOptions::new().create(true).append(true).open(dir.join("service.log")).map_err(|e|e.to_string())?;
  let mut cmd=Command::new(root.join(if cfg!(windows){"node.exe"}else{"node"}));cmd.arg(root.join("service.cjs")).arg("--data").arg(&dir).current_dir(&dir).stdin(Stdio::null()).stdout(log.try_clone().map_err(|e|e.to_string())?).stderr(log);
  #[cfg(windows)] cmd.creation_flags(0x08000000|0x00000200|0x00000008);
  cmd.spawn().map_err(|e|format!("Could not start ChatPort: {e}"))?;
- for _ in 0..100{std::thread::sleep(Duration::from_millis(100));if let Some(v)=read(){if healthy(&v){return Ok(v);}}}
+ for _ in 0..100{std::thread::sleep(Duration::from_millis(100));if let Some(v)=read_service(&dir){if healthy(&v){return Ok(v);}}}
  Err(format!("ChatPort could not start. See {}",dir.join("service.log").display()))
  }).await.map_err(|e|e.to_string())?
 }
@@ -219,7 +271,7 @@ fn focus_window(handle: u64, pid: u32) -> Result<(), String> {
     }
 }
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
@@ -228,6 +280,11 @@ fn main() {
             open_url,
             focus_window
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("ChatPort could not open");
+    app.run(|_, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            stop_current_service();
+        }
+    });
 }

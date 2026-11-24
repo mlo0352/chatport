@@ -57,5 +57,5 @@ jobs:
           else
             gh release create "$tag" ChatPort.exe ChatPort.exe.sha256 \
               --title "ChatPort ${tag#v}" \
-              --notes "Portable Windows build. Download ChatPort.exe and run it. No installer or separate Node runtime is required. Nearby discovers peers on the same LAN and Tailscale network. Requires Windows 10/11 with Microsoft Edge WebView2."
+              --notes "Portable Windows build. Download ChatPort.exe and run it. No installer or separate Node runtime is required. Closing the window now stops the background service, and upgrades automatically clean up an older service. Nearby discovers peers on the same LAN and Tailscale network. Requires Windows 10/11 with Microsoft Edge WebView2."
           fi

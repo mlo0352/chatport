@@ -124,25 +124,47 @@ try {
     if (j?.state === "failed") throw new Error(j.error);
     return j?.state === "completed";
   });
-  app.kill();
+  const exited = new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("ChatPort did not exit after closing its window")),
+      15000,
+    );
+    app.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+  await page.getByRole("button", { name: "Close" }).click();
+  await exited;
+  await until(async () => {
+    try {
+      const c = JSON.parse(await readFile(join(f.data, "service.json"), "utf8"));
+      const r = await fetch(`http://127.0.0.1:${c.port}/health`, {
+        headers: { Authorization: "Bearer " + c.token },
+      });
+      return !r.ok;
+    } catch {
+      return true;
+    }
+  }, 15000);
   await browser.close().catch(() => {});
   await delay(600);
-  assert.equal(
-    (await rpc("library")).chats.find((c) => c.id === selected.id).resumeCwd,
-    folder,
-  );
-  assert.equal(creds.pid, recoveredPid);
   page = await launch();
   await page.getByRole("button", { name: /First café/ }).waitFor();
   await page.getByRole("button", { name: /First café/ }).click();
   await until(async () =>
     (await page.locator(".working-folder").innerText()).includes(folder),
   );
+  const restarted = await rpc("library");
+  assert.notEqual(creds.pid, recoveredPid);
+  assert.equal(
+    restarted.chats.find((c) => c.id === selected.id).resumeCwd,
+    folder,
+  );
   await page.screenshot({
     path: ".test-data/native-chatport.png",
     scale: "css",
   });
-  assert.equal(creds.pid, recoveredPid);
   await writeFile(
     ".test-data/native-verification.json",
     JSON.stringify(
@@ -152,14 +174,15 @@ try {
         serviceCrashRecovered: true,
         folderOverrideSurvived: true,
         exportCompleted: true,
-        serviceSurvivedWindowClose: true,
+        serviceStoppedWithWindow: true,
+        serviceRestartedCleanly: true,
       },
       null,
       2,
     ),
   );
   console.log(
-    "PASS: packaged WebView2 UI, icon, folder persistence, automatic service recovery, portable export, and reopening the desktop window.",
+    "PASS: packaged WebView2 UI, icon, folder persistence, automatic service recovery, clean shutdown on window close, portable export, and a fresh service on reopen.",
   );
 } finally {
   app?.kill();
