@@ -3,6 +3,12 @@ import type { ServerResponse, IncomingMessage as HttpMessage } from "node:http";
 import { networkInterfaces, hostname } from "node:os";
 import { isIP } from "node:net";
 import {
+  createSocket,
+  type Socket as UdpSocket,
+  type RemoteInfo,
+} from "node:dgram";
+import { execFile } from "node:child_process";
+import {
   randomUUID,
   randomBytes,
   X509Certificate,
@@ -16,6 +22,7 @@ import { generate } from "selfsigned";
 import { Bonjour, type Browser, type Service } from "bonjour-service";
 import { z } from "zod";
 import { readJSON, atomicJSON, inside } from "./common";
+import { findExecutable } from "./platform";
 import { digest } from "./transfer";
 
 export type Device = {
@@ -81,7 +88,10 @@ type Options = {
   bind?: string;
   port?: number;
   discovery?: boolean;
+  mdns?: boolean;
   mdnsOptions?: any;
+  discoveryPort?: number;
+  tailscalePeers?: string[];
   addresses?: string[];
   enabled?: boolean;
   platform?: string;
@@ -104,6 +114,17 @@ const offerSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   includeImages: z.boolean(),
 });
+const beaconSchema = z.object({
+  app: z.literal("chatport"),
+  v: z.literal(1),
+  kind: z.enum(["query", "announce"]),
+  id: z.string().uuid(),
+  name: z.string().min(1).max(70).optional(),
+  platform: z.string().max(30).optional(),
+  port: z.number().int().min(1).max(65535).optional(),
+  fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+});
+const DISCOVERY_PORT = 45888;
 export const certFingerprint = (cert: string | Buffer) =>
   new X509Certificate(cert).fingerprint256.replaceAll(":", "").toLowerCase();
 const cleanHost = (value: string) => value.replace(/^::ffff:/, "");
@@ -117,6 +138,52 @@ function addresses() {
       ),
     ),
   ];
+}
+function tailscaleExecutable() {
+  const candidates =
+    process.platform === "win32"
+      ? [
+          process.env.ProgramFiles,
+          process.env.ProgramW6432,
+          process.env["ProgramFiles(x86)"],
+          "C:\\Program Files",
+        ]
+          .filter(Boolean)
+          .map((root) => join(String(root), "Tailscale", "tailscale.exe"))
+      : process.platform === "darwin"
+        ? [
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+            "/usr/local/bin/tailscale",
+            "/opt/homebrew/bin/tailscale",
+          ]
+        : [
+            "/usr/bin/tailscale",
+            "/usr/local/bin/tailscale",
+            "/opt/homebrew/bin/tailscale",
+          ];
+  return findExecutable("tailscale", process.platform, candidates);
+}
+function tailscaleAddresses(status: any) {
+  const peers = status?.Peer;
+  if (!peers || typeof peers !== "object") return [];
+  const result: string[] = [];
+  for (const peer of Object.values(peers) as any[]) {
+    if (peer?.Online === false) continue;
+    const ip = (Array.isArray(peer?.TailscaleIPs) ? peer.TailscaleIPs : []).find(
+      (value: unknown) => typeof value === "string" && isIP(value) === 4,
+    );
+    if (ip) result.push(ip);
+  }
+  return [...new Set(result)];
+}
+function discoveryTarget(value: string, fallback: number) {
+  const match = /^([^:]+)(?::(\d+))?$/.exec(value.trim());
+  if (!match) return undefined;
+  const host = match[1],
+    port = match[2] ? Number(match[2]) : fallback;
+  return isIP(host) === 4 && port > 0 && port < 65536
+    ? { host, port }
+    : undefined;
 }
 function equalSecret(a: string, b: string) {
   return (
@@ -141,7 +208,12 @@ export class Nearby {
   private bonjour?: Bonjour;
   private browser?: Browser;
   private published?: Service;
+  private udp?: UdpSocket;
   private timer?: ReturnType<typeof setInterval>;
+  private probing = false;
+  private nextUnicast = 0;
+  private tailscaleAt = 0;
+  private tailscaleCache: string[] = [];
   private invitation?: { token: string; expiresAt: number };
   private enabled = false;
   private port = 0;
@@ -275,44 +347,189 @@ export class Nearby {
       this.discoveryError = e.message;
     });
     if (this.options.discovery !== false) {
-      try {
-        this.bonjour = new Bonjour(this.options.mdnsOptions, (err: Error) => {
-          this.discoveryError = String(err.message || err);
-        });
-        this.published = this.bonjour.publish({
-          name: "ChatPort-" + this.identity.id,
-          type: "chatport",
-          protocol: "tcp",
-          port: this.port,
-          disableIPv6: true,
-          txt: {
-            v: "1",
-            id: this.identity.id,
-            name: this.identity.name,
-            platform: this.options.platform || process.platform,
-            fingerprint: certFingerprint(this.identity.cert),
-          },
-        });
-        this.browser = this.bonjour.find({ type: "chatport" }, (s) =>
-          this.found(s),
-        );
-        this.browser.on("down", (s) => {
-          const p = this.discovered.get(String(s.txt?.id));
-          if (p) p.online = false;
-        });
-      } catch (e: any) {
-        this.discoveryError = e.message;
+      if (this.options.mdns !== false) {
+        try {
+          this.bonjour = new Bonjour(this.options.mdnsOptions, (err: Error) => {
+            this.discoveryFailure(String(err.message || err));
+          });
+          this.published = this.bonjour.publish({
+            name: "ChatPort-" + this.identity.id,
+            type: "chatport",
+            protocol: "tcp",
+            port: this.port,
+            disableIPv6: true,
+            txt: {
+              v: "1",
+              id: this.identity.id,
+              name: this.identity.name,
+              platform: this.options.platform || process.platform,
+              fingerprint: certFingerprint(this.identity.cert),
+            },
+          });
+          this.browser = this.bonjour.find({ type: "chatport" }, (s) =>
+            this.found(s),
+          );
+          this.browser.on("down", (s) => {
+            const p = this.discovered.get(String(s.txt?.id));
+            if (p) p.online = false;
+          });
+        } catch (e: any) {
+          this.discoveryFailure(e.message);
+        }
       }
+      await this.startUnicast();
     }
     this.timer = setInterval(() => {
       if (Date.now() >= this.nextPing) {
         this.nextPing = Date.now() + 10000;
         void this.ping();
       }
+      if (Date.now() >= this.nextUnicast) {
+        this.nextUnicast = Date.now() + 5000;
+        void this.probe();
+      }
       void this.pollTransfers();
     }, 2000);
     this.timer.unref();
+    this.nextUnicast = 0;
     void this.ping();
+    void this.probe();
+  }
+  private discoveryFailure(message: string) {
+    if (this.discoveryError.includes(message)) return;
+    this.discoveryError = [this.discoveryError, message]
+      .filter(Boolean)
+      .join("; ")
+      .slice(0, 500);
+  }
+  private async startUnicast() {
+    const socket = createSocket("udp4");
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const error = (e: Error) => reject(e);
+        socket.once("error", error);
+        socket.bind(
+          this.options.discoveryPort || DISCOVERY_PORT,
+          "0.0.0.0",
+          () => {
+            socket.off("error", error);
+            resolve();
+          },
+        );
+      });
+    } catch (e: any) {
+      try {
+        socket.close();
+      } catch {}
+      this.discoveryFailure(
+        "Unicast discovery could not start on UDP port " +
+          (this.options.discoveryPort || DISCOVERY_PORT) +
+          " (" +
+          e.message +
+          ")",
+      );
+      return;
+    }
+    this.udp = socket;
+    socket.on("message", (data, rinfo) => this.udpMessage(data, rinfo));
+    socket.on("error", (e) =>
+      this.discoveryFailure("Unicast discovery failed (" + e.message + ")"),
+    );
+    void this.probe();
+  }
+  private async tailscalePeers() {
+    if (this.options.tailscalePeers) return this.options.tailscalePeers;
+    if (Date.now() - this.tailscaleAt < 30000) return this.tailscaleCache;
+    this.tailscaleAt = Date.now();
+    const exe = tailscaleExecutable();
+    if (!exe) return (this.tailscaleCache = []);
+    const output = await new Promise<string>((resolve) => {
+      execFile(
+        exe,
+        ["status", "--json"],
+        { windowsHide: true, timeout: 5000, maxBuffer: 4 * 1024 * 1024 },
+        (error, stdout) => resolve(error ? "" : String(stdout)),
+      );
+    });
+    try {
+      this.tailscaleCache = tailscaleAddresses(JSON.parse(output));
+    } catch {
+      this.tailscaleCache = [];
+    }
+    return this.tailscaleCache;
+  }
+  private async probe() {
+    if (this.stopping || this.probing || !this.udp || !this.enabled) return;
+    this.probing = true;
+    try {
+      const peers = await this.tailscalePeers();
+      if (this.stopping || !this.udp || !this.enabled) return;
+      const data = Buffer.from(
+        JSON.stringify({
+          app: "chatport",
+          v: 1,
+          kind: "query",
+          id: this.identity.id,
+        }),
+      );
+      for (const peer of peers) {
+        const target = discoveryTarget(
+          peer,
+          this.options.discoveryPort || DISCOVERY_PORT,
+        );
+        if (target)
+          this.udp.send(data, target.port, target.host, () => {});
+      }
+    } catch (e: any) {
+      this.discoveryFailure("Unicast discovery probe failed (" + e.message + ")");
+    } finally {
+      this.probing = false;
+    }
+  }
+  private announce(host: string, port: number) {
+    if (this.stopping || !this.udp || !this.enabled || !this.identity) return;
+    const device = this.publicDevice();
+    const data = Buffer.from(
+      JSON.stringify({
+        app: "chatport",
+        v: 1,
+        kind: "announce",
+        id: device.id,
+        name: device.name,
+        platform: device.platform,
+        port: device.port,
+        fingerprint: device.fingerprint,
+      }),
+    );
+    try {
+      this.udp.send(data, port, host, () => {});
+    } catch {}
+  }
+  private udpMessage(data: Buffer, rinfo: RemoteInfo) {
+    if (data.length > 4096) return;
+    let value: z.infer<typeof beaconSchema>;
+    try {
+      const parsed = beaconSchema.safeParse(JSON.parse(data.toString("utf8")));
+      if (!parsed.success) return;
+      value = parsed.data;
+    } catch {
+      return;
+    }
+    if (value.id === this.identity.id) return;
+    const host = cleanHost(rinfo.address);
+    if (isIP(host) !== 4) return;
+    if (value.kind === "query") {
+      this.announce(host, rinfo.port);
+      return;
+    }
+    this.foundDevice({
+      id: value.id,
+      name: value.name || "ChatPort computer",
+      platform: value.platform || "unknown",
+      host,
+      port: value.port!,
+      fingerprint: value.fingerprint!,
+    });
   }
   private found(service: any) {
     const txt = service.txt || {},
@@ -322,21 +539,41 @@ export class Nearby {
           service.addresses?.find((h: string) => isIP(h) === 4) ||
           "",
       );
-    if (
-      id === this.identity.id ||
-      !z.string().uuid().safeParse(id).success ||
-      !isIP(host) ||
-      !service.port ||
-      !/^([a-f0-9]{64})$/.test(String(txt.fingerprint))
-    )
-      return;
-    const p: Device = {
+    this.foundDevice({
       id,
       name: String(txt.name || service.name).slice(0, 70),
       platform: String(txt.platform || "unknown"),
       host,
       port: service.port,
       fingerprint: String(txt.fingerprint),
+    });
+  }
+  private foundDevice(value: {
+    id: string;
+    name: string;
+    platform: string;
+    host: string;
+    port: number;
+    fingerprint: string;
+  }) {
+    const { id, name, platform, host, port, fingerprint } = value;
+    if (
+      id === this.identity.id ||
+      !z.string().uuid().safeParse(id).success ||
+      !isIP(host) ||
+      !Number.isInteger(port) ||
+      port < 1 ||
+      port > 65535 ||
+      !/^([a-f0-9]{64})$/.test(fingerprint)
+    )
+      return;
+    const p: Device = {
+      id,
+      name: name.slice(0, 70),
+      platform: platform.slice(0, 30),
+      host,
+      port,
+      fingerprint,
       online: true,
       trusted: this.trusted.has(id),
       lastSeen: Date.now(),
@@ -350,6 +587,8 @@ export class Nearby {
   }
   refresh() {
     this.browser?.update();
+    this.nextUnicast = 0;
+    void this.probe();
     void this.ping();
   }
   status() {
@@ -999,6 +1238,10 @@ export class Nearby {
   private async stopListening() {
     this.stopping = true;
     if (this.timer) clearInterval(this.timer);
+    try {
+      this.udp?.close();
+    } catch {}
+    this.udp = undefined;
     this.browser?.stop();
     this.bonjour?.unpublishAll();
     this.bonjour?.destroy();

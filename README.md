@@ -33,7 +33,7 @@ The **TermSanity** action opens local Codex/Claude conversations as nested agent
 
 ## Send to a nearby computer
 
-Open **Nearby** on both computers. ChatPort discovers instances on the same LAN using mDNS. Copy a pairing link from one computer and paste it into **Pair computer** on the other within two minutes. Pair once to send in either direction. An explicit IP works when multicast discovery is blocked.
+Open **Nearby** on both computers. ChatPort discovers instances on the same LAN using mDNS and on the same Tailscale network using each peer's Tailscale address, so multicast-blocked and routed networks still work. Copy a pairing link from one computer and paste it into **Pair computer** on the other within two minutes. Pair once to send in either direction. An explicit IP works when automatic discovery is unavailable.
 
 Check conversations in the library, then open Nearby and click **Send selected** beside the destination. With no selection the action is **Send all chats**. The receiver must accept each offer. Transfers use HTTPS with pinned device certificates, mutual certificate authentication and per-pair credentials; received archives are size/hash checked and validated before import. Sending retains the originals. Interrupted transfers are marked failed and can be retried. Pairing identities, offers and transfer records survive restarts. Nearby can be turned off.
 

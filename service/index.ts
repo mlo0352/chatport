@@ -724,7 +724,7 @@ const server = createServer(async (req, res) => {
       res.end(
         JSON.stringify({
           ok: true,
-          version: "0.3.0",
+          version: "0.3.1",
           activeJobs: workers.size,
         }),
       );
@@ -751,7 +751,7 @@ server.listen(0, "127.0.0.1", () => {
     port: (server.address() as any).port,
     token: secret,
     pid: process.pid,
-    version: "0.3.0",
+    version: "0.3.1",
   });
   scan();
   setInterval(scan, 15000).unref();

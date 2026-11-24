@@ -27,7 +27,7 @@ Portable conversations and images are readable across OSes. Codex native restore
 1. Build/install on a real Linux laptop; check native pickers, dark/system theme, terminal startup and Unicode paths.
 2. Transfer synthetic chats in both directions between Windows and Linux; verify image preview, checksums, receiver acceptance, interrupted-transfer retry, and identity retention after restart.
 3. Restore a synthetic Codex profile, map the project path, sign in separately, and resume that exact session. Verify flock ownership on that CLI release.
-4. Check discovery on the chosen LAN. It uses mDNS UDP 5353; transfers use an app-owned HTTPS TCP port. Network isolation or firewalls may prevent discovery; pairing links allow an explicit IP. ChatPort does not change firewall settings.
+4. Check discovery on the chosen LAN or tailnet. It uses mDNS UDP 5353 on the LAN and direct unicast UDP 45888 probes to peers reported by `tailscale status --json`; transfers use an app-owned HTTPS TCP port. Network isolation or firewalls may prevent discovery; pairing links allow an explicit IP. ChatPort does not change firewall settings.
 5. Test window focus on that desktop. Windows activation is implemented. On Linux, ChatPort uses `xdotool` to find and activate an X11 window owned by the process holding the Codex writer lock; install `xdotool` to use it. Native Wayland does not allow this and is reported as unavailable.
 
 Tauri references: https://v2.tauri.app/start/prerequisites/ and https://v2.tauri.app/distribute/debian/.

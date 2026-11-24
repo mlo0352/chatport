@@ -391,8 +391,9 @@ export default function Nearby({
           <Wifi size={26} />
           <h3>Looking for ChatPort computers</h3>
           <p>
-            Open ChatPort on your other computer. If the network blocks
-            discovery, use a pairing link and its IP address.
+            Open ChatPort on your other computer. ChatPort looks on your LAN
+            and Tailscale network. If discovery is blocked, use a pairing link
+            and its IP address.
           </p>
         </div>
       )}

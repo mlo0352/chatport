@@ -1,6 +1,9 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {mkdir,readFile,writeFile} from 'node:fs/promises';import {join} from 'node:path';import {randomUUID} from 'node:crypto';import {DatabaseSync} from 'node:sqlite';import https from 'node:https';import {api,fixture} from './helpers.mjs';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {mkdir,readFile,writeFile} from 'node:fs/promises';import {join} from 'node:path';import {randomUUID} from 'node:crypto';import {DatabaseSync} from 'node:sqlite';import https from 'node:https';
+import {createSocket} from 'node:dgram';
+import {api,fixture} from './helpers.mjs';
 const wait=async(fn)=>{for(let i=0;i<150;i++){const value=fn();if(value)return value;await new Promise(r=>setTimeout(r,50));}throw new Error('Timed out waiting for a transfer');};
 const record=(n,id)=>n.status().transfers.find(t=>t.id===id);
+const freeUdpPorts=async(count)=>{const sockets=await Promise.all(Array.from({length:count},()=>new Promise((resolve,reject)=>{const socket=createSocket('udp4');socket.once('error',reject);socket.bind(0,'127.0.0.1',()=>resolve(socket));})));const ports=sockets.map(s=>s.address().port);await Promise.all(sockets.map(s=>new Promise(resolve=>s.close(resolve))));return ports;};
 test('paired HTTPS transfers require acceptance, work both ways, survive restart, reject unpaired requests and verify checksums',async()=>{
  const f=await fixture(),s=api.source('codex',f.codex),chats=api.listChats(s),imports=[];let a,b,c;
  const options=(name)=>({dataDir:join(f.root,name),name,bind:'127.0.0.1',addresses:['127.0.0.1'],discovery:false});
@@ -26,6 +29,10 @@ test('portable folder mappings respect OS case, directory boundaries, UNC, root 
 test('mDNS discovers two instances using an isolated loopback multicast group',async()=>{
  const f=await fixture();const mdnsOptions={interface:'127.0.0.1',ip:'239.255.77.77',port:15353,loopback:true,reuseAddr:true};const hooks={prepare:async()=>{throw new Error('unused');},importFile:async()=>{throw new Error('unused');}};let a,b;
  try{a=await new api.Nearby({dataDir:join(f.root,'discover-a'),name:'Discovery A',bind:'127.0.0.1',mdnsOptions},hooks).start();b=await new api.Nearby({dataDir:join(f.root,'discover-b'),name:'Discovery B',bind:'127.0.0.1',mdnsOptions},hooks).start();await wait(()=>a.status().peers.find(p=>p.id===b.status().device.id)&&b.status().peers.find(p=>p.id===a.status().device.id));assert.equal(a.status().peers[0].name,'Discovery B');assert.equal(a.status().peers[0].trusted,false);}finally{await Promise.all([a?.close(),b?.close()]);}
+});
+test('unicast discovery finds ChatPort peers over a routed network without mDNS',async()=>{
+ const f=await fixture(),[portA,portB]=await freeUdpPorts(2),hooks={prepare:async()=>{throw new Error('unused');},importFile:async()=>{throw new Error('unused');}};let a,b;
+ try{a=await new api.Nearby({dataDir:join(f.root,'routed-a'),name:'Routed A',bind:'127.0.0.1',addresses:['127.0.0.1'],mdns:false,discoveryPort:portA,tailscalePeers:['127.0.0.1:'+portB]},hooks).start();b=await new api.Nearby({dataDir:join(f.root,'routed-b'),name:'Routed B',bind:'127.0.0.1',addresses:['127.0.0.1'],mdns:false,discoveryPort:portB,tailscalePeers:['127.0.0.1:'+portA]},hooks).start();a.refresh();b.refresh();await wait(()=>a.status().peers.find(p=>p.id===b.status().device.id)&&b.status().peers.find(p=>p.id===a.status().device.id));assert.equal(a.status().peers[0].name,'Routed B');assert.equal(a.status().peers[0].host,'127.0.0.1');assert.equal(a.status().peers[0].trusted,false);}finally{await Promise.all([a?.close(),b?.close()]);}
 });
 test('Linux platform plans use XDG storage, POSIX PATH and native executable names without running Linux',()=>{assert.equal(api.appDataPath('linux',{XDG_DATA_HOME:'/data'},'/home/example'),'/data/chatport');assert.equal(api.appDataPath('linux',{},'/home/example'),'/home/example/.local/share/chatport');assert.equal(api.executableName('node','linux'),'node');assert.deepEqual(api.pathEntries('linux','/usr/bin:/home/example/.local/bin'),['/usr/bin','/home/example/.local/bin']);});
 test('native restore rebases a Linux transcript root onto the current host and preserves session IDs',async()=>{
